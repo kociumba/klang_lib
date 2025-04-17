@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use crate::analysis::diagnostic::DiagnosticCollector;
 use crate::parser::ast::{Program, ScopeId, SourceSpan, SymbolTable};
 
+#[derive(Debug)]
 pub struct AnalysisContext<'a> {
     pub diagnostics: DiagnosticCollector,
     pub symbol_table: SymbolTable,
@@ -43,7 +44,8 @@ impl<'a> AnalysisContext<'a> {
     }
 
     pub fn get_span_for_identifier(&self, name: &String) -> Option<SourceSpan> {
-        todo!()
+        // TODO: actually implement this
+        None
     }
 
     // TODO: this impl is unfinished

@@ -19,6 +19,7 @@ impl SemanticRule for DuplicateDeclarationRule {
         DiagnosticSeverity::Error
     }
 
+    #[allow(unused_variables)]
     fn check(&self, ctx: &mut AnalysisContext, node: &AstNode) -> Result<(), ()> {
         // This rule is now handled during symbol table construction,
         // but we could add more sophisticated checks here

@@ -1,7 +1,7 @@
 use crate::analysis::context::AnalysisContext;
 use crate::analysis::diagnostic::DiagnosticSeverity;
 use crate::analysis::rule::SemanticRule;
-use crate::parser::ast::{AstNode, BinaryOperator, Expression, LValue, Literal, Statement, Symbol, TypeReference};
+use crate::parser::ast::{AstNode, BinaryOperator, Expression, LValue, Literal, SourcePosition, SourceSpan, Statement, Symbol, TypeReference};
 
 // Rule to check types in assignments
 pub struct TypeCheckRule;
@@ -85,10 +85,10 @@ impl TypeCheckRule {
         }
     }
 
-    fn get_expression_type(ctx: &mut AnalysisContext, expr: &Expression) -> TypeReference {
+    pub(crate) fn get_expression_type(ctx: &mut AnalysisContext, expr: &Expression) -> TypeReference {
         match expr {
             Expression::Literal(lit) => match lit {
-                Literal::Integer(_) => TypeReference::Int32,
+                Literal::Integer(_) => TypeReference::Int64,
                 Literal::Float(_) => TypeReference::Float32,
                 Literal::String(_) => TypeReference::String,
                 Literal::Boolean(_) => TypeReference::Bool,
@@ -98,19 +98,46 @@ impl TypeCheckRule {
                 if let Some(Symbol::Variable(var)) = ctx.symbol_table.lookup_symbol(ctx.current_scope, name) {
                     var.type_ref.clone()
                 } else {
+                    ctx.diagnostics.report_error(
+                        "undefined-variable",
+                        format!("Undefined variable '{}'", name),
+                        SourceSpan {
+                            start: SourcePosition { line: 0, column: 0 },
+                            end: SourcePosition { line: 0, column: 0 }
+                        },
+                    );
                     TypeReference::Unresolved
                 }
-            }
-            // Handle other expression types...
+            },
+            Expression::BinaryOperation { left, operator, right, .. } => {
+                let left_type = Self::get_expression_type(ctx, left);
+                let right_type = Self::get_expression_type(ctx, right);
+                match operator {
+                    BinaryOperator::Add | BinaryOperator::Subtract | BinaryOperator::Multiply | BinaryOperator::Divide => {
+                        if left_type == right_type && Self::are_numeric_types(&left_type) {
+                            left_type
+                        } else {
+                            TypeReference::Unresolved
+                        }
+                    }
+                    BinaryOperator::Equal | BinaryOperator::NotEqual => TypeReference::Bool,
+                    _ => TypeReference::Unresolved,
+                }
+            },
+            Expression::FunctionCall { function, arguments, .. } => {
+                // TODO: resolve function types
+                TypeReference::Unresolved
+            },
             _ => TypeReference::Unresolved,
         }
     }
 
-    fn are_types_compatible(t1: &TypeReference, t2: &TypeReference) -> bool {
+    pub(crate) fn are_types_compatible(t1: &TypeReference, t2: &TypeReference) -> bool {
         match (t1, t2) {
             (TypeReference::Unresolved, _) | (_, TypeReference::Unresolved) => false,
             (t1, t2) if t1 == t2 => true,
-            _ => false, // Simplified for now
+            // TODO: when codegen is implemented with type coercion, handle coerced type compatibility
+            _ => false,
         }
     }
 
@@ -121,7 +148,7 @@ impl TypeCheckRule {
         )
     }
 
-    fn type_to_string(typ: &TypeReference) -> String {
+    pub(crate) fn type_to_string(typ: &TypeReference) -> String {
         match typ {
             TypeReference::Int32 => "int32".to_string(),
             TypeReference::Int64 => "int64".to_string(),

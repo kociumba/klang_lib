@@ -22,6 +22,7 @@ pub struct DiagnosticRelatedInfo {
     pub span: SourceSpan,
 }
 
+#[derive(Debug, Clone)]
 pub struct DiagnosticCollector {
     diagnostics: Vec<Diagnostic>,
 }

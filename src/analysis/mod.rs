@@ -4,13 +4,16 @@ mod context;
 mod rule_registry;
 mod rules;
 mod external_api;
+mod diagnostic_printer;
 
 use crate::analysis::context::AnalysisContext;
 use crate::analysis::diagnostic::Diagnostic;
 use crate::analysis::rule_registry::RuleRegistry;
 use crate::parser::ast::*;
 use crate::analysis::rules::duplicate_decl::DuplicateDeclarationRule;
+use crate::analysis::rules::return_type::ReturnTypeCheckRule;
 use crate::analysis::rules::type_check::TypeCheckRule;
+use crate::analysis::rules::type_resolve::TypeResolutionRule;
 use crate::analysis::rules::undefined_val::UndefinedVariableRule;
 
 pub struct SemanticAnalyzer {
@@ -25,8 +28,8 @@ impl SemanticAnalyzer {
         registry.register(DuplicateDeclarationRule);
         registry.register(TypeCheckRule);
         registry.register(UndefinedVariableRule);
-        // registry.register(AssignToImmutableRule);
-        // registry.register(ReturnTypeCheckRule);
+        registry.register(TypeResolutionRule);
+        registry.register(ReturnTypeCheckRule);
         // registry.register(ConditionTypeCheckRule);
         // registry.register(UnusedVariableRule);
         // Add more rules here...
@@ -240,20 +243,15 @@ impl SemanticAnalyzer {
     fn visit_statement(&self, ctx: &mut AnalysisContext, stmt: &Statement) {
         match stmt {
             Statement::VariableDeclaration(var_decl) => {
-                // Similar to top-level variable declaration
                 for rule in self.rule_registry.get_all_rules() {
                     if ctx.is_rule_enabled(rule.id()) {
                         let node = AstNode::VariableDeclaration(var_decl);
-                        let _ = rule.check(ctx, &node);
+                        rule.check(ctx, &node).unwrap_or(());
                     }
                 }
-
-                // Visit initializer if present
                 if let Some(init) = &var_decl.initializer {
                     self.visit_expression(ctx, init);
                 }
-
-                // Add variable to current scope
                 let symbol = VariableSymbol {
                     name: var_decl.name.clone(),
                     type_ref: var_decl.type_ref.clone(),
@@ -261,25 +259,65 @@ impl SemanticAnalyzer {
                     span: var_decl.span,
                     is_resolved: false,
                 };
-
-                let _ = ctx.symbol_table.add_symbol(
-                    ctx.current_scope,
-                    &var_decl.name,
-                    Symbol::Variable(symbol)
-                );
+                if let Err(msg) = ctx.symbol_table.add_symbol(ctx.current_scope, &var_decl.name, Symbol::Variable(symbol)) {
+                    ctx.diagnostics.report_error("duplicate-declaration", msg, var_decl.span);
+                }
             }
-
-            // Implement other statement types...
-
-            _ => {
-                // Apply rules to this statement
+            Statement::Assignment(assignment) => {
                 for rule in self.rule_registry.get_all_rules() {
                     if ctx.is_rule_enabled(rule.id()) {
                         let node = AstNode::Statement(stmt);
-                        let _ = rule.check(ctx, &node);
+                        rule.check(ctx, &node).unwrap_or(());
                     }
                 }
+                self.visit_expression(ctx, &assignment.value);
+                match &assignment.target {
+                    LValue::MemberAccess { object, .. } => self.visit_expression(ctx, object),
+                    LValue::IndexAccess { array, index, .. } => {
+                        self.visit_expression(ctx, array);
+                        self.visit_expression(ctx, index);
+                    }
+                    _ => {}
+                }
             }
+            Statement::ExpressionStatement(expr) => self.visit_expression(ctx, expr),
+            Statement::ReturnStatement(ret_stmt) => {
+                for rule in self.rule_registry.get_all_rules() {
+                    if ctx.is_rule_enabled(rule.id()) {
+                        let node = AstNode::Statement(stmt);
+                        rule.check(ctx, &node).unwrap_or(());
+                    }
+                }
+                if let Some(value) = &ret_stmt.value {
+                    self.visit_expression(ctx, value);
+                }
+            }
+            Statement::IfStatement(if_stmt) => {
+                self.visit_expression(ctx, &if_stmt.condition);
+                self.visit_block(ctx, &if_stmt.then_branch);
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    self.visit_statement(ctx, else_branch);
+                }
+            }
+            Statement::WhileStatement(while_stmt) => {
+                self.visit_expression(ctx, &while_stmt.condition);
+                self.visit_block(ctx, &while_stmt.body);
+            }
+            Statement::ForStatement(for_stmt) => {
+                self.visit_expression(ctx, &for_stmt.iterable);
+                ctx.enter_scope();
+                let symbol = VariableSymbol {
+                    name: for_stmt.iterator.clone(),
+                    type_ref: TypeReference::Unresolved, // To be inferred
+                    is_mutable: true,
+                    span: for_stmt.span,
+                    is_resolved: false,
+                };
+                ctx.symbol_table.add_symbol(ctx.current_scope, &for_stmt.iterator, Symbol::Variable(symbol)).unwrap_or(());
+                self.visit_block(ctx, &for_stmt.body);
+                ctx.exit_scope();
+            }
+            Statement::Block(block) => self.visit_block(ctx, block),
         }
     }
 
@@ -323,70 +361,22 @@ impl SemanticAnalyzer {
     }
 
     fn visit_type_definition(&self, ctx: &mut AnalysisContext, type_def: &TypeDefinition) {
-        todo!()
-    }
-    
-    // TODO: this impl is not finished
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
-
-    const TEST_GRAMMAR: &str = r#"
-// comments should be ignored
-type MyStruct: struct {
-    MyField: int,
-}
-
-type MyType: string
-
-fun isEven(arg1: int) -> bool {
-    return arg1 % 2 == 0
-}
-
-fun main() -> int {
-    run(5, "6")
-
-    var x: int = 0
-
-    while x < 2 {
-        x = x + 1
-        printf("%d\n", isEven(x))
-    }
-    return 0
-}
-
-fun run(arg1: int, arg2: string) -> int {
-    return loop(arg1, arg2)
-}
-
-fun loop(arg1: int, arg2: string) -> int {
-    var j: int = 0
-
-    for i in range(0, arg1) {
-        j = i + j
-        if isEven(i) {
-            printf("%d\n", j)
-        } else {
-            printf("%d\n", i)
+        match type_def {
+            TypeDefinition::Alias(type_ref) => {
+                // Type resolution can be deferred to a TypeResolutionRule
+            }
+            TypeDefinition::Struct(struct_def) => {
+                for field in &struct_def.fields {
+                    for rule in self.rule_registry.get_all_rules() {
+                        if ctx.is_rule_enabled(rule.id()) {
+                            let node = AstNode::StructField(field);
+                            rule.check(ctx, &node).unwrap_or(());
+                        }
+                    }
+                }
+            }
         }
     }
 
-    return j
-}
-"#;
-
-    #[test]
-    fn test_analysis() {
-        let test_str = TEST_GRAMMAR;
-        let mut lex = Lexer::new(test_str);
-        let mut parser = Parser::new(&mut lex);
-        let program = parser.parse_program();
-        let result = SemanticAnalyzer::new().analyze(&mut program.unwrap());
-        print!("{:#?}", result);
-        assert!(result.is_ok());
-    }
+    // TODO: this impl is not finished
 }

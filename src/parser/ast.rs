@@ -35,6 +35,7 @@ pub enum AstNode<'a> {
     Statement(&'a Statement),
     Expression(&'a Expression),
     Block(&'a Block),
+    StructField(&'a StructField),
 }
 
 /// A symbol table to track declarations across the program
