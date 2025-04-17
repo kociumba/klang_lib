@@ -1,0 +1,18 @@
+version: '3'
+
+tasks:
+    gen:header:
+        cmds:
+            - cbindgen --output klang_lib.h
+
+    build:
+        cmds:
+            - task: gen:header
+            - task: build:release
+
+    build:release:
+        cmds:
+            - cargo build --release
+    build:debug:
+        cmds:
+            - cargo build
