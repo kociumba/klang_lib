@@ -1,6 +1,6 @@
+use crate::analysis::SemanticAnalyzer;
 use crate::analysis::context::AnalysisContext;
 use crate::analysis::diagnostic::{Diagnostic, DiagnosticSeverity};
-use crate::analysis::SemanticAnalyzer;
 use crate::parser::ast::{Program, SourcePosition, SourceSpan};
 
 pub struct AnalyzerConfig {
@@ -23,7 +23,7 @@ impl SemanticAnalyzer {
     pub fn analyze_with_config(
         &self,
         program: &mut Program,
-        config: AnalyzerConfig
+        config: AnalyzerConfig,
     ) -> Result<(), Vec<Diagnostic>> {
         let mut ctx = AnalysisContext::new(program);
 
@@ -48,7 +48,8 @@ impl SemanticAnalyzer {
         }
 
         if let Some(limit) = config.error_limit {
-            let error_count = diagnostics.iter()
+            let error_count = diagnostics
+                .iter()
                 .filter(|d| d.severity == DiagnosticSeverity::Error)
                 .count();
 
@@ -69,7 +70,10 @@ impl SemanticAnalyzer {
         }
 
         // Return results
-        if diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error) {
+        if diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error)
+        {
             Err(diagnostics)
         } else {
             Ok(())
@@ -78,7 +82,8 @@ impl SemanticAnalyzer {
 
     /// get all registered rules
     pub fn list_rules(&self) -> Vec<(&'static str, &'static str, DiagnosticSeverity)> {
-        self.rule_registry.get_all_rules()
+        self.rule_registry
+            .get_all_rules()
             .iter()
             .map(|rule| (rule.id(), rule.description(), rule.severity()))
             .collect()
@@ -87,11 +92,11 @@ impl SemanticAnalyzer {
 
 #[cfg(test)]
 mod tests {
-    use log::error;
-    use crate::analysis::diagnostic_printer::DiagnosticPrinter;
     use super::*;
+    use crate::analysis::diagnostic_printer::DiagnosticPrinter;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use log::error;
 
     const TEST_GRAMMAR: &str = r#"
 // comments should be ignored
@@ -143,13 +148,21 @@ fun loop(arg1: int, arg2: string) -> int {
         let mut lex = Lexer::new(test_str);
         let mut parser = Parser::new(&mut lex);
         let program = parser.parse_program();
-        let result = SemanticAnalyzer::new().analyze_with_config(&mut program.unwrap(), AnalyzerConfig {
-            disabled_rules: vec![],
-            warning_as_error: false,
-            error_limit: None,
-        });
+        let result = SemanticAnalyzer::new().analyze_with_config(
+            &mut program.unwrap(),
+            AnalyzerConfig {
+                disabled_rules: vec![],
+                warning_as_error: false,
+                error_limit: None,
+            },
+        );
         assert!(result.is_err()); // we expect some errors for now
-        DiagnosticPrinter::new(TEST_GRAMMAR.to_string(), "test_file.k".to_string(), Some(false)).print_errors(result.err().unwrap());
+        DiagnosticPrinter::new(
+            TEST_GRAMMAR.to_string(),
+            "test_file.k".to_string(),
+            Some(false),
+        )
+        .print_errors(result.err().unwrap());
         // print!("{:#?}", result);
         // assert!(result.is_ok());
     }

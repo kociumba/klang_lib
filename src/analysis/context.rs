@@ -1,6 +1,6 @@
-use std::collections::HashSet;
 use crate::analysis::diagnostic::DiagnosticCollector;
-use crate::parser::ast::{Program, ScopeId, SourceSpan, SymbolTable};
+use crate::parser::ast::{Program, ScopeId, SourceSpan, Symbol, SymbolTable};
+use std::collections::HashSet;
 
 #[derive(Debug)]
 pub struct AnalysisContext<'a> {
@@ -43,8 +43,18 @@ impl<'a> AnalysisContext<'a> {
         }
     }
 
-    pub fn get_span_for_identifier(&self, name: &String) -> Option<SourceSpan> {
-        // TODO: actually implement this
+    pub fn get_span_for_identifier(&mut self, name: &String) -> Option<SourceSpan> {
+        let mut current_scope = Some(self.current_scope);
+        while let Some(scope_id) = current_scope {
+            if let Some(symbol) = self.symbol_table.lookup_symbol(scope_id, name) {
+                return Some(match symbol {
+                    Symbol::Variable(var) => var.span,
+                    Symbol::Function(func) => func.span,
+                    Symbol::Type(typ) => typ.span,
+                });
+            }
+            current_scope = self.symbol_table.get_parent_scope(scope_id);
+        }
         None
     }
 

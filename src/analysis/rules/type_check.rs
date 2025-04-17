@@ -1,7 +1,10 @@
 use crate::analysis::context::AnalysisContext;
 use crate::analysis::diagnostic::DiagnosticSeverity;
 use crate::analysis::rule::SemanticRule;
-use crate::parser::ast::{AstNode, BinaryOperator, Expression, LValue, Literal, SourcePosition, SourceSpan, Statement, Symbol, TypeReference};
+use crate::parser::ast::{
+    AstNode, BinaryOperator, Expression, LValue, Literal, SourcePosition, SourceSpan, Statement,
+    Symbol, TypeReference, UnaryOperator,
+};
 
 // Rule to check types in assignments
 pub struct TypeCheckRule;
@@ -33,18 +36,30 @@ impl SemanticRule for TypeCheckRule {
                             Self::type_to_string(&value_type),
                             Self::type_to_string(&target_type)
                         ),
-                        assignment.span
+                        assignment.span,
                     );
                 }
             }
 
-            AstNode::Expression(Expression::BinaryOperation { left, operator, right, span, .. }) => {
+            AstNode::Expression(Expression::BinaryOperation {
+                left,
+                operator,
+                right,
+                span,
+                ..
+            }) => {
                 let left_type = Self::get_expression_type(ctx, left);
                 let right_type = Self::get_expression_type(ctx, right);
 
                 match operator {
-                    BinaryOperator::Add | BinaryOperator::Subtract | BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Modulo => {
-                        if !Self::are_numeric_types(&left_type) || !Self::are_numeric_types(&right_type) {
+                    BinaryOperator::Add
+                    | BinaryOperator::Subtract
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide
+                    | BinaryOperator::Modulo => {
+                        if !Self::are_numeric_types(&left_type)
+                            || !Self::are_numeric_types(&right_type)
+                        {
                             ctx.diagnostics.report_error(
                                 self.id(),
                                 format!(
@@ -53,7 +68,7 @@ impl SemanticRule for TypeCheckRule {
                                     Self::type_to_string(&left_type),
                                     Self::type_to_string(&right_type)
                                 ),
-                                *span
+                                *span,
                             );
                         }
                     }
@@ -74,7 +89,9 @@ impl TypeCheckRule {
     fn get_lvalue_type(ctx: &mut AnalysisContext, lvalue: &LValue) -> TypeReference {
         match lvalue {
             LValue::Identifier(name) => {
-                if let Some(Symbol::Variable(var)) = ctx.symbol_table.lookup_symbol(ctx.current_scope, name) {
+                if let Some(Symbol::Variable(var)) =
+                    ctx.symbol_table.lookup_symbol(ctx.current_scope, name)
+                {
                     var.type_ref.clone()
                 } else {
                     TypeReference::Unresolved
@@ -85,7 +102,10 @@ impl TypeCheckRule {
         }
     }
 
-    pub(crate) fn get_expression_type(ctx: &mut AnalysisContext, expr: &Expression) -> TypeReference {
+    pub(crate) fn get_expression_type(
+        ctx: &mut AnalysisContext,
+        expr: &Expression,
+    ) -> TypeReference {
         match expr {
             Expression::Literal(lit) => match lit {
                 Literal::Integer(_) => TypeReference::Int64,
@@ -95,40 +115,137 @@ impl TypeCheckRule {
                 Literal::Null => TypeReference::Void,
             },
             Expression::Identifier(name) => {
-                if let Some(Symbol::Variable(var)) = ctx.symbol_table.lookup_symbol(ctx.current_scope, name) {
+                if let Some(Symbol::Variable(var)) =
+                    ctx.symbol_table.lookup_symbol(ctx.current_scope, name)
+                {
                     var.type_ref.clone()
                 } else {
+                    let span = ctx.get_span_for_identifier(name).unwrap_or(SourceSpan {
+                        start: SourcePosition { line: 0, column: 0 },
+                        end: SourcePosition { line: 0, column: 0 },
+                    });
                     ctx.diagnostics.report_error(
                         "undefined-variable",
                         format!("Undefined variable '{}'", name),
-                        SourceSpan {
-                            start: SourcePosition { line: 0, column: 0 },
-                            end: SourcePosition { line: 0, column: 0 }
-                        },
+                        span,
                     );
                     TypeReference::Unresolved
                 }
-            },
-            Expression::BinaryOperation { left, operator, right, .. } => {
+            }
+            Expression::BinaryOperation {
+                left,
+                operator,
+                right,
+                ..
+            } => {
                 let left_type = Self::get_expression_type(ctx, left);
                 let right_type = Self::get_expression_type(ctx, right);
                 match operator {
-                    BinaryOperator::Add | BinaryOperator::Subtract | BinaryOperator::Multiply | BinaryOperator::Divide => {
+                    BinaryOperator::Add
+                    | BinaryOperator::Subtract
+                    | BinaryOperator::Multiply
+                    | BinaryOperator::Divide => {
                         if left_type == right_type && Self::are_numeric_types(&left_type) {
                             left_type
                         } else {
                             TypeReference::Unresolved
                         }
                     }
-                    BinaryOperator::Equal | BinaryOperator::NotEqual => TypeReference::Bool,
+                    BinaryOperator::Equal
+                    | BinaryOperator::NotEqual
+                    | BinaryOperator::LessThan
+                    | BinaryOperator::LessThanOrEqual
+                    | BinaryOperator::GreaterThan
+                    | BinaryOperator::GreaterThanOrEqual => TypeReference::Bool,
+                    BinaryOperator::Modulo => {
+                        if left_type == TypeReference::Int64 && right_type == TypeReference::Int64 {
+                            TypeReference::Int64
+                        } else {
+                            TypeReference::Unresolved
+                        }
+                    }
                     _ => TypeReference::Unresolved,
                 }
-            },
-            Expression::FunctionCall { function, arguments, .. } => {
-                // TODO: resolve function types
+            }
+            Expression::UnaryOperation {
+                operator, operand, ..
+            } => {
+                let operand_type = Self::get_expression_type(ctx, operand);
+                match operator {
+                    UnaryOperator::Negative => {
+                        if Self::are_numeric_types(&operand_type) {
+                            operand_type
+                        } else {
+                            TypeReference::Unresolved
+                        }
+                    }
+                    UnaryOperator::Not => TypeReference::Bool,
+                    _ => operand_type,
+                }
+            }
+            Expression::FunctionCall {
+                function,
+                arguments,
+                ..
+            } => {
+                if let Expression::Identifier(func_name) = &**function {
+                    if let Some(Symbol::Function(func)) = ctx
+                        .symbol_table
+                        .clone()
+                        .lookup_symbol(ctx.current_scope, func_name)
+                    {
+                        // Check argument types match parameter types
+                        if func.parameters.len() != arguments.len() {
+                            let span =
+                                ctx.get_span_for_identifier(func_name)
+                                    .unwrap_or(SourceSpan {
+                                        start: SourcePosition { line: 0, column: 0 },
+                                        end: SourcePosition { line: 0, column: 0 },
+                                    });
+                            ctx.diagnostics.report_error(
+                                "type-check",
+                                format!(
+                                    "Function '{}' expects {} arguments, got {}",
+                                    func_name,
+                                    func.parameters.len(),
+                                    arguments.len()
+                                ),
+                                span,
+                            );
+                            return TypeReference::Unresolved;
+                        }
+                        for (param, arg) in func.parameters.iter().zip(arguments.iter()) {
+                            let arg_type = Self::get_expression_type(ctx, arg);
+                            if !Self::are_types_compatible(&param.type_ref, &arg_type) {
+                                ctx.diagnostics.report_error(
+                                    "type-check",
+                                    format!(
+                                        "Argument type mismatch: expected '{}', got '{}'",
+                                        Self::type_to_string(&param.type_ref),
+                                        Self::type_to_string(&arg_type)
+                                    ),
+                                    SourceSpan {
+                                        // can not really get the real spans right now
+                                        start: SourcePosition { line: 0, column: 0 },
+                                        end: SourcePosition { line: 0, column: 0 },
+                                    },
+                                );
+                            }
+                        }
+                        return func.return_type.clone();
+                    }
+                }
                 TypeReference::Unresolved
-            },
-            _ => TypeReference::Unresolved,
+            }
+            Expression::MemberAccess { object, member, .. } => {
+                // Placeholder: requires struct type resolution
+                TypeReference::Unresolved
+            }
+            Expression::IndexAccess { array, .. } => {
+                // Placeholder: requires array type resolution
+                TypeReference::Unresolved
+            }
+            Expression::Grouping { expression, .. } => Self::get_expression_type(ctx, expression),
         }
     }
 
@@ -144,7 +261,10 @@ impl TypeCheckRule {
     fn are_numeric_types(typ: &TypeReference) -> bool {
         matches!(
             typ,
-            TypeReference::Int32 | TypeReference::Int64 | TypeReference::Float32 | TypeReference::Float64
+            TypeReference::Int32
+                | TypeReference::Int64
+                | TypeReference::Float32
+                | TypeReference::Float64
         )
     }
 
@@ -158,7 +278,10 @@ impl TypeCheckRule {
             TypeReference::String => "string".to_string(),
             TypeReference::Void => "void".to_string(),
             TypeReference::Named(name) => name.clone(),
-            TypeReference::Function { parameters, return_type } => {
+            TypeReference::Function {
+                parameters,
+                return_type,
+            } => {
                 let params = parameters
                     .iter()
                     .map(|p| Self::type_to_string(p))

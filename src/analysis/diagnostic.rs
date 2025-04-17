@@ -1,3 +1,4 @@
+use std::ffi::{c_char, CString};
 use crate::parser::ast::SourceSpan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,5 +73,24 @@ impl DiagnosticCollector {
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    // TODO: should be later wrapped in an extern C function for use with c ffi
+    pub fn to_c_strings(&self) -> Vec<*mut c_char> {
+        self.diagnostics.iter()
+            .map(|d| {
+                let msg = format!(
+                    "{}:{}:{} [{}] {}",
+                    d.span.start.line, d.span.start.column,
+                    match d.severity {
+                        DiagnosticSeverity::Error => "error",
+                        DiagnosticSeverity::Warning => "warning",
+                        DiagnosticSeverity::Info => "info",
+                    },
+                    d.rule_id, d.message
+                );
+                CString::new(msg).unwrap().into_raw()
+            })
+            .collect()
     }
 }
